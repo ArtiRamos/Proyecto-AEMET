@@ -128,7 +128,7 @@ def ask(q: str = Query(..., description="Ejemplo: ¿Qué temperatura hizo ayer?"
     df["fecha"] = pd.to_datetime(df["fecha"])
 
     parsed = parse_query_llm(q)
-
+    print("LLM output:", parsed)
 
 
     if parsed is None:
