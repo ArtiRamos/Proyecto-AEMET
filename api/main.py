@@ -46,6 +46,41 @@ def get_data():
 
     return df
 
+#Se utiliza esta llamada a una api para 
+
+import requests
+import json
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+HF_API_TOKEN = os.getenv("HF_TOKEN")
+
+def parse_query_llm(question: str):
+    prompt = f"""Responde SOLO en JSON válido.
+    Formato: {{"tipo":"media|maxima|minima","fecha":"YYYY-MM-DD"}}
+    Convierte esta pregunta:{question}"""
+
+    response = requests.post(
+        "https://api-inference.huggingface.co/models/google/flan-t5-base",
+        headers={"Authorization": f"Bearer {HF_API_TOKEN}"},
+        json={"inputs": prompt}
+    )
+
+    try:
+        output = response.json()[0]["generated_text"]
+        return json.loads(output)
+    except:
+        return None
+
+    try:
+        output = response.json()[0]["generated_text"]
+        import json as js
+        return js.loads(output)
+    except:
+        return None
+
 
 # FORECAST (SOLO MAÑANA)
 
@@ -71,34 +106,46 @@ def forecast():
 @app.get("/ask")
 def ask(q: str = Query(..., description="Ejemplo: ¿Qué temperatura hizo ayer?")):
 
-    df = get_data()
-    q_lower = q.lower()
+    df = get_data()
 
-    last = df.iloc[-1]
+    parsed = parse_query_llm(q)
 
-    if "ayer" in q_lower:
+    if not parsed:
+        return {
+            "respuesta": "No se ha podido interpretar la pregunta. Intente con una fecha clara (por ejemplo: 12/03/2024 o 'ayer')."}
 
-        if "max" in q_lower:
-            value = round(float(last['tmax']), 2)
-            tipo = "máxima"
+    tipo = parsed.get("tipo", "media")
+    fecha_str = parsed.get("fecha")
 
-        elif "min" in q_lower:
-            value = round(float(last['tmin']), 2)
-            tipo = "mínima"
+    if not fecha_str:
+        return {
+            "respuesta": "No se ha podido identificar la fecha en la pregunta."}
 
-        else:
-            value = round(float(last['tmed']), 2)
-            tipo = "media"
+    try:
+        target_date = pd.to_datetime(fecha_str)
+    except:
+        return {
+            "respuesta": "El formato de fecha no es válido."}
 
-        return {
-            "location": "Aeropuerto de Madrid",
-            "question": q,
-            "temperature": value,
-            "type": tipo,
-            "unit": "°C"
-        }
+    # Selección de columna
 
-    return {
-        "error": "Consulta no reconocida",
-        "help": "Puedes preguntar: temperatura media, mínima o máxima de ayer"
-    }
+    if tipo == "maxima":
+        column = "tmax"
+        tipo_texto = "máxima"
+    elif tipo == "minima":
+        column = "tmin"
+        tipo_texto = "mínima"
+    else:
+        column = "tmed"
+        tipo_texto = "media"
+
+    result = df[df["fecha"] == target_date]
+
+    if result.empty:
+        return {
+            "respuesta": f"No hay datos disponibles para el {target_date.strftime('%d/%m/%Y')} en el Aeropuerto de Madrid"}
+
+    value = round(float(result.iloc[0][column]), 2)
+
+    return {
+        "respuesta": f"La temperatura {tipo_texto} registrada el {target_date.strftime('%d/%m/%Y')} en el Aeropuerto de Madrid fue de {value} °C."}
